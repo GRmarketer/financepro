@@ -157,8 +157,8 @@ td.money.income{color:var(--color-green)}td.money.expense{color:var(--color-red)
 @media(max-width:768px){.sidebar{transform:translateX(-100%)}.sidebar.open{transform:translateX(0);width:220px}.sidebar.open .nav-text,.sidebar.open .sidebar-footer,.sidebar.open .sidebar-logo span,.sidebar.open .nav-label{display:block}.sidebar.open .sidebar-logo{justify-content:flex-start;padding:20px 18px}.sidebar.open .nav-item{justify-content:flex-start;padding:10px 14px}.hamburger{display:block}.overlay.show{display:block}.main{margin-left:0;padding:calc(var(--header-h) + 12px) 14px 14px}.global-header{left:0;padding:0 14px 0 50px}.kpi-row{grid-template-columns:1fr 1fr}.charts-grid{grid-template-columns:1fr}.budget-total{grid-template-columns:1fr}}
 @media(max-width:480px){.kpi-row{grid-template-columns:1fr}.form-grid{grid-template-columns:1fr}}
 </style>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 </head>
 <body>
 <div class="toast-container" id="toastContainer"></div>
@@ -192,7 +192,7 @@ td.money.income{color:var(--color-green)}td.money.expense{color:var(--color-red)
 </div>
 <!-- TRANSAÇÕES -->
 <div class="section" id="sec-transacoes">
-<div class="section-header"><div class="section-title">Transações</div><div class="filters"><button class="btn btn-primary" onclick="openTransForm()">+ Nova Transação</button></div></div>
+<div class="section-header"><div class="section-title">Transações</div><div class="filters"><select class="filter-select" id="templateSelect" onchange="loadTemplate(this.value)" style="min-width:160px"><option value="">Usar template...</option></select><button class="btn btn-primary" onclick="openTransForm()">+ Nova Transação</button></div></div>
 <div class="form-card" id="transFormCard" style="display:none"><div class="form-title" id="transFormTitle">Nova Transação</div><div class="form-grid">
 <div class="form-group"><label>Tipo</label><select id="fTipo" onchange="onTipoChange()"><option value="despesa">Despesa</option><option value="receita">Receita</option></select></div>
 <div class="form-group"><label>Descrição</label><input type="text" id="fDesc" placeholder="Ex: Aluguel, Freelance..."></div>
@@ -204,7 +204,7 @@ td.money.income{color:var(--color-green)}td.money.expense{color:var(--color-red)
 <div class="form-group" id="fParcelasGroup" style="display:none"><label>Parcelas</label><input type="number" id="fParcelas" min="2" max="48" value="2"></div>
 <div class="form-group"><label>Status</label><select id="fStatus"><option value="pendente">Pendente</option><option value="pago">Pago</option><option value="atrasado">Atrasado</option></select></div>
 <div class="form-group full"><label>Observação</label><textarea id="fObs" placeholder="Notas opcionais..."></textarea></div>
-</div><div class="form-actions"><button class="btn btn-primary" onclick="saveTransaction()">Salvar</button><button class="btn btn-secondary" onclick="closeTransForm()">Cancelar</button></div></div>
+</div><div class="form-actions"><button class="btn btn-primary" onclick="saveTransaction()">Salvar</button><button class="btn btn-secondary" onclick="saveAsTemplate()">Salvar como Template</button><button class="btn btn-secondary" onclick="closeTransForm()">Cancelar</button></div></div>
 <div class="table-toolbar" style="background:var(--bg-card);border:1px solid var(--border-card);border-radius:var(--radius) var(--radius) 0 0;margin-bottom:0">
 <input type="text" class="filter-input" id="searchTrans" placeholder="Buscar por descrição..." oninput="renderTransactions()">
 <select class="filter-select" id="filterCat" onchange="renderTransactions()"><option value="">Todas categorias</option></select>
@@ -268,20 +268,21 @@ const DEFAULT_BUDGETS={'Moradia':1500,'Combustível / Transporte':600,'Alimenta�
 function loadData(k,fb){try{const d=localStorage.getItem(k);return d?JSON.parse(d):fb}catch{return fb}}
 function saveData(k,d){localStorage.setItem(k,JSON.stringify(d))}
 let transactions=loadData(STORAGE_KEYS.trans,[]),budgets=loadData(STORAGE_KEYS.budget,DEFAULT_BUDGETS),goals=loadData(STORAGE_KEYS.goals,[]),config=loadData(STORAGE_KEYS.config,{renda:0,expenseCats:DEFAULT_EXPENSE_CATS,incomeCats:DEFAULT_INCOME_CATS});
+let templates=loadData('financas_templates',[]);
 if(config.expenseCats[0]&&config.expenseCats[0].emoji){config.expenseCats=DEFAULT_EXPENSE_CATS;config.incomeCats=DEFAULT_INCOME_CATS;saveData(STORAGE_KEYS.config,config)}
 
 // Persist: save to localStorage immediately + sync to Firebase
 let _fbSyncTimer=null;
 function persist(){
-  saveData(STORAGE_KEYS.trans,transactions);saveData(STORAGE_KEYS.budget,budgets);saveData(STORAGE_KEYS.goals,goals);saveData(STORAGE_KEYS.config,config);
+  saveData(STORAGE_KEYS.trans,transactions);saveData(STORAGE_KEYS.budget,budgets);saveData(STORAGE_KEYS.goals,goals);saveData(STORAGE_KEYS.config,config);saveData('financas_templates',templates);
   // Debounce Firebase writes (500ms)
   clearTimeout(_fbSyncTimer);
   _fbSyncTimer=setTimeout(()=>{syncToFirebase()},500);
 }
 function syncToFirebase(){
   db.collection(FIREBASE_COLLECTION).doc(FIREBASE_USER_ID).set({
-    transactions,budgets,goals,config,updatedAt:firebase.firestore.FieldValue.serverTimestamp()
-  }).then(()=>{console.log('Firebase synced')}).catch(e=>{console.warn('Firebase sync error:',e)});
+    transactions,budgets,goals,config,templates,updatedAt:firebase.firestore.FieldValue.serverTimestamp()
+  }).then(()=>{console.log('Firebase synced')}).catch(e=>{console.error('Firebase sync error:',e);toast('Erro ao sincronizar: '+e.message,'error')});
 }
 // Load from Firebase on startup (overrides localStorage if newer data exists)
 function loadFromFirebase(){
@@ -292,9 +293,10 @@ function loadFromFirebase(){
       if(d.budgets)budgets=d.budgets;
       if(d.goals)goals=d.goals;
       if(d.config)config=d.config;
+      if(d.templates)templates=d.templates;
       // Update localStorage cache
       saveData(STORAGE_KEYS.trans,transactions);saveData(STORAGE_KEYS.budget,budgets);
-      saveData(STORAGE_KEYS.goals,goals);saveData(STORAGE_KEYS.config,config);
+      saveData(STORAGE_KEYS.goals,goals);saveData(STORAGE_KEYS.config,config);saveData('financas_templates',templates);
       console.log('Loaded from Firebase');
       return true;
     }
@@ -310,8 +312,9 @@ function listenFirebase(){
     if(d.budgets)budgets=d.budgets;
     if(d.goals)goals=d.goals;
     if(d.config)config=d.config;
+    if(d.templates)templates=d.templates;
     saveData(STORAGE_KEYS.trans,transactions);saveData(STORAGE_KEYS.budget,budgets);
-    saveData(STORAGE_KEYS.goals,goals);saveData(STORAGE_KEYS.config,config);
+    saveData(STORAGE_KEYS.goals,goals);saveData(STORAGE_KEYS.config,config);saveData('financas_templates',templates);
     // Refresh current view
     const active=document.querySelector('.section.active');
     if(active)refreshCurrentSection(active.id.replace('sec-',''));
@@ -422,8 +425,44 @@ function renderTransactions(){
   document.getElementById('transFooterRec').innerHTML=`<span>${recList.length} receitas</span><span>Total: <strong style="color:var(--color-green)">${fmt(tR)}</strong></span>`;
   document.getElementById('transFooterDesp').innerHTML=`<span>${despList.length} despesas</span><span>Total: <strong style="color:var(--color-red)">${fmt(tD)}</strong></span>`;
 }
-function duplicateTrans(id){const t=transactions.find(x=>x.id===id);if(!t)return;const nt={...t,id:uid(),status:'pendente',data:today()};delete nt.groupId;delete nt.parcela;delete nt.parcelasTotal;transactions.push(nt);persist();renderTransactions();toast('Transação duplicada!')}
+function duplicateTrans(id){const t=transactions.find(x=>x.id===id);if(!t)return;const nt={...t,id:uid()};delete nt.groupId;delete nt.parcela;delete nt.parcelasTotal;transactions.push(nt);persist();renderTransactions();toast('Transação duplicada!')}
 function deleteTrans(id){const t=transactions.find(x=>x.id===id);if(!t)return;if(t.groupId){showModal('Excluir Parcela','Excluir apenas esta parcela ou todas as restantes?',[{label:'Apenas esta',cls:'btn-secondary',fn:()=>{transactions=transactions.filter(x=>x.id!==id);persist();renderTransactions();toast('Parcela excluída!')}},{label:'Todas restantes',cls:'btn-danger',fn:()=>{transactions=transactions.filter(x=>!(x.groupId===t.groupId&&x.data>=t.data));persist();renderTransactions();toast('Parcelas excluídas!')}},{label:'Cancelar',cls:'btn-secondary'}])}else{showModal('Confirmar Exclusão',`Excluir "<strong>${t.descricao}</strong>"?`,[{label:'Excluir',cls:'btn-danger',fn:()=>{transactions=transactions.filter(x=>x.id!==id);persist();renderTransactions();toast('Transação excluída!')}},{label:'Cancelar',cls:'btn-secondary'}])}}
+
+// ===== TEMPLATES (#12) =====
+function saveAsTemplate(){
+  const desc=document.getElementById('fDesc').value.trim();
+  if(!desc){toast('Preencha a descrição para salvar o template','error');return}
+  const tpl={id:uid(),nome:desc,tipo:document.getElementById('fTipo').value,descricao:desc,
+    valor:parseMoney(document.getElementById('fValor').value),categoria:document.getElementById('fCategoria').value,
+    pagamento:document.getElementById('fPagamento').value,recorrencia:document.getElementById('fRecorrencia').value,
+    status:document.getElementById('fStatus').value,obs:document.getElementById('fObs').value};
+  templates.push(tpl);persist();populateTemplates();toast('Template "'+desc+'" salvo!')
+}
+function loadTemplate(id){
+  const sel=document.getElementById('templateSelect');
+  if(!id){sel.value='';return}
+  const tpl=templates.find(t=>t.id===id);
+  if(!tpl){sel.value='';return}
+  openTransForm();
+  document.getElementById('fTipo').value=tpl.tipo;onTipoChange();
+  document.getElementById('fDesc').value=tpl.descricao;
+  if(tpl.valor)setMoneyInput(document.getElementById('fValor'),tpl.valor);
+  document.getElementById('fData').value=today();
+  setTimeout(()=>{document.getElementById('fCategoria').value=tpl.categoria},50);
+  document.getElementById('fPagamento').value=tpl.pagamento;onPagamentoChange();
+  document.getElementById('fRecorrencia').value=tpl.recorrencia;
+  document.getElementById('fStatus').value=tpl.status;
+  document.getElementById('fObs').value=tpl.obs||'';
+  sel.value='';
+}
+function deleteTemplate(id){
+  templates=templates.filter(t=>t.id!==id);persist();populateTemplates();toast('Template removido!')
+}
+function populateTemplates(){
+  const sel=document.getElementById('templateSelect');
+  sel.innerHTML='<option value="">Usar template...</option>';
+  templates.forEach(t=>{const o=document.createElement('option');o.value=t.id;o.textContent=t.nome+' ('+fmt(t.valor)+')';sel.appendChild(o)});
+}
 
 // ===== PARCELAS =====
 function renderParcelas(){const mk=getGlobalMonth();const groups={};transactions.filter(t=>t.groupId).forEach(t=>{if(!groups[t.groupId])groups[t.groupId]=[];groups[t.groupId].push(t)});const activeGroups=Object.values(groups).filter(g=>g.some(t=>t.status!=='pago'));const monthParcelas=[];activeGroups.forEach(g=>{g.sort((a,b)=>a.data.localeCompare(b.data));const current=g.find(t=>monthKey(t.data)===mk)||g.find(t=>t.status!=='pago');if(current){const baseDesc=current.descricao.replace(/\s*\(\d+\/\d+\)\s*/,'');const total=g.length;const paidCount=g.filter(t=>t.status==='pago').length;const nextPending=g.find(t=>t.status!=='pago');const lastItem=g[g.length-1];monthParcelas.push({desc:baseDesc,cat:current.categoria,parcela:`${paidCount}/${total}`,valorParcela:Number(current.valor),valorTotal:g.reduce((s,t)=>s+Number(t.valor),0),proxVenc:nextPending?nextPending.data:'-',termino:lastItem.data,status:current.status})}});const recorrentes=transactions.filter(t=>t.recorrencia&&t.recorrencia!=='unica');const uniqueRec={};recorrentes.forEach(t=>{const key=t.descricao+t.valor;if(!uniqueRec[key])uniqueRec[key]=t});const assinaturas=Object.values(uniqueRec);const totalPM=monthParcelas.reduce((s,p)=>s+p.valorParcela,0);const totalAM=assinaturas.reduce((s,t)=>s+Number(t.valor),0);
@@ -464,13 +503,13 @@ function saveConfig(){config.renda=parseMoney(document.getElementById('cfgRenda'
 function renderRendaSummary(){const c=document.getElementById('rendaSummary'),renda=config.renda||0;if(renda<=0){c.innerHTML='';return}const mk=monthKey(today()),mt=transactions.filter(t=>monthKey(t.data)===mk);const desp=mt.filter(t=>t.tipo==='despesa'&&t.status==='pago').reduce((s,t)=>s+Number(t.valor),0);const pct=desp/renda*100;const disp=renda-desp;const col=pct>100?'var(--color-red)':pct>80?'var(--color-yellow)':'var(--color-green)';c.innerHTML=`<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;padding:12px 0;border-top:1px solid var(--border-card)"><div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary);margin-bottom:3px;font-weight:600">Renda</div><div style="font-size:16px;font-weight:700;color:var(--color-accent)">${fmt(renda)}</div></div><div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary);margin-bottom:3px;font-weight:600">Gasto</div><div style="font-size:16px;font-weight:700;color:var(--color-red)">${fmt(desp)}</div></div><div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary);margin-bottom:3px;font-weight:600">Disponível</div><div style="font-size:16px;font-weight:700;color:${col}">${fmt(disp)}</div></div></div><div style="height:6px;background:rgba(255,255,255,0.04);border-radius:3px;overflow:hidden;margin-top:2px"><div style="height:100%;width:${Math.min(pct,100)}%;border-radius:3px;background:${col};transition:width .5s"></div></div><div style="text-align:right;font-size:10px;color:var(--text-secondary);margin-top:3px">${pct.toFixed(1)}% comprometido</div>`}
 function exportData(){const d={transactions,budgets,goals,config,exportDate:new Date().toISOString()};const b=new Blob([JSON.stringify(d,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=`financaspro_backup_${today()}.json`;a.click();toast('Backup exportado!')}
 function importData(e){const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=ev=>{try{const d=JSON.parse(ev.target.result);if(d.transactions)transactions=d.transactions;if(d.budgets)budgets=d.budgets;if(d.goals)goals=d.goals;if(d.config)config=d.config;persist();populateMonthSelectors();toast('Dados importados!');switchSection('dashboard')}catch{toast('Erro ao importar','error')}};r.readAsText(f);e.target.value=''}
-function clearAllData(){showModal('Limpar Dados','Esta ação é irreversível. Todos os dados serão apagados.',[{label:'Limpar Tudo',cls:'btn-danger',fn:()=>{transactions=[];budgets={...DEFAULT_BUDGETS};goals=[];config={renda:0,expenseCats:DEFAULT_EXPENSE_CATS.map(c=>({...c})),incomeCats:DEFAULT_INCOME_CATS.map(c=>({...c}))};persist();populateMonthSelectors();switchSection('dashboard');toast('Dados apagados!','warning')}},{label:'Cancelar',cls:'btn-secondary'}])}
+function clearAllData(){showModal('Limpar Dados','Esta ação é irreversível. Todos os dados serão apagados.',[{label:'Limpar Tudo',cls:'btn-danger',fn:()=>{transactions=[];budgets={...DEFAULT_BUDGETS};goals=[];templates=[];config={renda:0,expenseCats:DEFAULT_EXPENSE_CATS.map(c=>({...c})),incomeCats:DEFAULT_INCOME_CATS.map(c=>({...c}))};persist();populateMonthSelectors();populateTemplates();switchSection('dashboard');toast('Dados apagados!','warning')}},{label:'Cancelar',cls:'btn-secondary'}])}
 function init(){
-  autoMarkOverdue();populateMonthSelectors();refreshDashboard();
+  autoMarkOverdue();populateMonthSelectors();populateTemplates();refreshDashboard();
   // Load from Firebase (async) — overrides localStorage if data exists
   loadFromFirebase().then(loaded=>{
     if(loaded){
-      autoMarkOverdue();populateMonthSelectors();
+      autoMarkOverdue();populateMonthSelectors();populateTemplates();
       const active=document.querySelector('.section.active');
       if(active)refreshCurrentSection(active.id.replace('sec-',''));
     }else if(transactions.length||goals.length||config.renda){

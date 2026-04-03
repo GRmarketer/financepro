@@ -157,6 +157,8 @@ td.money.income{color:var(--color-green)}td.money.expense{color:var(--color-red)
 @media(max-width:768px){.sidebar{transform:translateX(-100%)}.sidebar.open{transform:translateX(0);width:220px}.sidebar.open .nav-text,.sidebar.open .sidebar-footer,.sidebar.open .sidebar-logo span,.sidebar.open .nav-label{display:block}.sidebar.open .sidebar-logo{justify-content:flex-start;padding:20px 18px}.sidebar.open .nav-item{justify-content:flex-start;padding:10px 14px}.hamburger{display:block}.overlay.show{display:block}.main{margin-left:0;padding:calc(var(--header-h) + 12px) 14px 14px}.global-header{left:0;padding:0 14px 0 50px}.kpi-row{grid-template-columns:1fr 1fr}.charts-grid{grid-template-columns:1fr}.budget-total{grid-template-columns:1fr}}
 @media(max-width:480px){.kpi-row{grid-template-columns:1fr}.form-grid{grid-template-columns:1fr}}
 </style>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 </head>
 <body>
 <div class="toast-container" id="toastContainer"></div>
@@ -250,6 +252,14 @@ td.money.income{color:var(--color-green)}td.money.expense{color:var(--color-red)
 </div>
 </div>
 <script>
+// ===== FIREBASE =====
+const firebaseConfig={apiKey:"AIzaSyCIDTfU2URrh2FzVXnxqKda9FCUE1vCnmc",authDomain:"my-finances-fb77e.firebaseapp.com",projectId:"my-finances-fb77e",storageBucket:"my-finances-fb77e.firebasestorage.app",messagingSenderId:"987577820496",appId:"1:987577820496:web:f50de2495a1fd96a4ef855"};
+firebase.initializeApp(firebaseConfig);
+const db=firebase.firestore();
+const FIREBASE_DOC='financas_data';
+const FIREBASE_COLLECTION='users';
+const FIREBASE_USER_ID='default_user';
+
 // ===== DATA =====
 const STORAGE_KEYS={trans:'financas_transacoes',budget:'financas_orcamento',goals:'financas_metas',config:'financas_config'};
 const DEFAULT_EXPENSE_CATS=[{name:'Moradia',color:'#4090e0'},{name:'Combustível / Transporte',color:'#e09820'},{name:'Alimentação',color:'#00c96e'},{name:'Lazer',color:'#f04060'},{name:'Saúde',color:'#8070d0'},{name:'Educação',color:'#36b6c3'},{name:'Vestuário',color:'#e070a0'},{name:'Assinaturas',color:'#6080ef'},{name:'Manutenção',color:'#c4a5fd'},{name:'Pets',color:'#4ade80'},{name:'Cuidados Pessoais',color:'#fba024'},{name:'Presentes / Doações',color:'#f090c0'},{name:'Outros',color:'#707090'}];
@@ -259,7 +269,55 @@ function loadData(k,fb){try{const d=localStorage.getItem(k);return d?JSON.parse(
 function saveData(k,d){localStorage.setItem(k,JSON.stringify(d))}
 let transactions=loadData(STORAGE_KEYS.trans,[]),budgets=loadData(STORAGE_KEYS.budget,DEFAULT_BUDGETS),goals=loadData(STORAGE_KEYS.goals,[]),config=loadData(STORAGE_KEYS.config,{renda:0,expenseCats:DEFAULT_EXPENSE_CATS,incomeCats:DEFAULT_INCOME_CATS});
 if(config.expenseCats[0]&&config.expenseCats[0].emoji){config.expenseCats=DEFAULT_EXPENSE_CATS;config.incomeCats=DEFAULT_INCOME_CATS;saveData(STORAGE_KEYS.config,config)}
-function persist(){saveData(STORAGE_KEYS.trans,transactions);saveData(STORAGE_KEYS.budget,budgets);saveData(STORAGE_KEYS.goals,goals);saveData(STORAGE_KEYS.config,config)}
+
+// Persist: save to localStorage immediately + sync to Firebase
+let _fbSyncTimer=null;
+function persist(){
+  saveData(STORAGE_KEYS.trans,transactions);saveData(STORAGE_KEYS.budget,budgets);saveData(STORAGE_KEYS.goals,goals);saveData(STORAGE_KEYS.config,config);
+  // Debounce Firebase writes (500ms)
+  clearTimeout(_fbSyncTimer);
+  _fbSyncTimer=setTimeout(()=>{syncToFirebase()},500);
+}
+function syncToFirebase(){
+  db.collection(FIREBASE_COLLECTION).doc(FIREBASE_USER_ID).set({
+    transactions,budgets,goals,config,updatedAt:firebase.firestore.FieldValue.serverTimestamp()
+  }).then(()=>{console.log('Firebase synced')}).catch(e=>{console.warn('Firebase sync error:',e)});
+}
+// Load from Firebase on startup (overrides localStorage if newer data exists)
+function loadFromFirebase(){
+  return db.collection(FIREBASE_COLLECTION).doc(FIREBASE_USER_ID).get().then(doc=>{
+    if(doc.exists){
+      const d=doc.data();
+      if(d.transactions)transactions=d.transactions;
+      if(d.budgets)budgets=d.budgets;
+      if(d.goals)goals=d.goals;
+      if(d.config)config=d.config;
+      // Update localStorage cache
+      saveData(STORAGE_KEYS.trans,transactions);saveData(STORAGE_KEYS.budget,budgets);
+      saveData(STORAGE_KEYS.goals,goals);saveData(STORAGE_KEYS.config,config);
+      console.log('Loaded from Firebase');
+      return true;
+    }
+    return false;
+  }).catch(e=>{console.warn('Firebase load error:',e);return false});
+}
+// Listen for realtime changes (other tabs/devices)
+function listenFirebase(){
+  db.collection(FIREBASE_COLLECTION).doc(FIREBASE_USER_ID).onSnapshot(doc=>{
+    if(!doc.exists||!doc.metadata.hasPendingWrites===false)return;
+    const d=doc.data();
+    if(d.transactions)transactions=d.transactions;
+    if(d.budgets)budgets=d.budgets;
+    if(d.goals)goals=d.goals;
+    if(d.config)config=d.config;
+    saveData(STORAGE_KEYS.trans,transactions);saveData(STORAGE_KEYS.budget,budgets);
+    saveData(STORAGE_KEYS.goals,goals);saveData(STORAGE_KEYS.config,config);
+    // Refresh current view
+    const active=document.querySelector('.section.active');
+    if(active)refreshCurrentSection(active.id.replace('sec-',''));
+    populateMonthSelectors();
+  },e=>{console.warn('Firebase listener error:',e)});
+}
 
 // ===== MONEY MASK (#11) =====
 function maskMoney(el){let v=el.value.replace(/\D/g,'');if(!v)v='0';let n=parseInt(v,10);el.value=(n/100).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}
@@ -407,7 +465,21 @@ function renderRendaSummary(){const c=document.getElementById('rendaSummary'),re
 function exportData(){const d={transactions,budgets,goals,config,exportDate:new Date().toISOString()};const b=new Blob([JSON.stringify(d,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=`financaspro_backup_${today()}.json`;a.click();toast('Backup exportado!')}
 function importData(e){const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=ev=>{try{const d=JSON.parse(ev.target.result);if(d.transactions)transactions=d.transactions;if(d.budgets)budgets=d.budgets;if(d.goals)goals=d.goals;if(d.config)config=d.config;persist();populateMonthSelectors();toast('Dados importados!');switchSection('dashboard')}catch{toast('Erro ao importar','error')}};r.readAsText(f);e.target.value=''}
 function clearAllData(){showModal('Limpar Dados','Esta ação é irreversível. Todos os dados serão apagados.',[{label:'Limpar Tudo',cls:'btn-danger',fn:()=>{transactions=[];budgets={...DEFAULT_BUDGETS};goals=[];config={renda:0,expenseCats:DEFAULT_EXPENSE_CATS.map(c=>({...c})),incomeCats:DEFAULT_INCOME_CATS.map(c=>({...c}))};persist();populateMonthSelectors();switchSection('dashboard');toast('Dados apagados!','warning')}},{label:'Cancelar',cls:'btn-secondary'}])}
-function init(){autoMarkOverdue();populateMonthSelectors();refreshDashboard()}
+function init(){
+  autoMarkOverdue();populateMonthSelectors();refreshDashboard();
+  // Load from Firebase (async) — will override localStorage if data exists
+  loadFromFirebase().then(loaded=>{
+    if(loaded){autoMarkOverdue();populateMonthSelectors();
+      const active=document.querySelector('.section.active');
+      if(active)refreshCurrentSection(active.id.replace('sec-',''));
+      toast('Dados sincronizados','success');
+    }else{
+      // First time: push local data to Firebase
+      syncToFirebase();
+    }
+    listenFirebase();
+  });
+}
 init();
 </script>
 </body>

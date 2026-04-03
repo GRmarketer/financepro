@@ -304,7 +304,7 @@ function loadFromFirebase(){
 // Listen for realtime changes (other tabs/devices)
 function listenFirebase(){
   db.collection(FIREBASE_COLLECTION).doc(FIREBASE_USER_ID).onSnapshot(doc=>{
-    if(!doc.exists||!doc.metadata.hasPendingWrites===false)return;
+    if(!doc.exists||doc.metadata.hasPendingWrites)return;
     const d=doc.data();
     if(d.transactions)transactions=d.transactions;
     if(d.budgets)budgets=d.budgets;
@@ -467,14 +467,14 @@ function importData(e){const f=e.target.files[0];if(!f)return;const r=new FileRe
 function clearAllData(){showModal('Limpar Dados','Esta ação é irreversível. Todos os dados serão apagados.',[{label:'Limpar Tudo',cls:'btn-danger',fn:()=>{transactions=[];budgets={...DEFAULT_BUDGETS};goals=[];config={renda:0,expenseCats:DEFAULT_EXPENSE_CATS.map(c=>({...c})),incomeCats:DEFAULT_INCOME_CATS.map(c=>({...c}))};persist();populateMonthSelectors();switchSection('dashboard');toast('Dados apagados!','warning')}},{label:'Cancelar',cls:'btn-secondary'}])}
 function init(){
   autoMarkOverdue();populateMonthSelectors();refreshDashboard();
-  // Load from Firebase (async) — will override localStorage if data exists
+  // Load from Firebase (async) — overrides localStorage if data exists
   loadFromFirebase().then(loaded=>{
-    if(loaded){autoMarkOverdue();populateMonthSelectors();
+    if(loaded){
+      autoMarkOverdue();populateMonthSelectors();
       const active=document.querySelector('.section.active');
       if(active)refreshCurrentSection(active.id.replace('sec-',''));
-      toast('Dados sincronizados','success');
-    }else{
-      // First time: push local data to Firebase
+    }else if(transactions.length||goals.length||config.renda){
+      // First time with existing local data: push to Firebase
       syncToFirebase();
     }
     listenFirebase();
